@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -12,7 +10,7 @@ import (
 )
 
 type Payload struct {
-	// [redacted]
+	URL string `json:"url"`
 }
 
 type PayloadCollection struct {
@@ -32,8 +30,8 @@ func (p *Payload) UploadToS3() error {
 }
 
 const (
-	MaxWorker = 100
-	MaxQueue  = 20
+	MaxWorker = 10
+	MaxQueue  = 40
 	MaxLength = 500
 )
 
@@ -101,25 +99,17 @@ func PayloadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Print the raw request body
-	body, err := io.ReadAll(io.LimitReader(r.Body, MaxLength))
-	if err != nil {
-		log.Printf("Error reading request body: %s", err.Error())
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	fmt.Println("Raw request body:", string(body))
-
-	// Read the body into a string for JSON decoding
-	var content = &PayloadCollection{}
-	err = json.NewDecoder(io.LimitReader(io.MultiReader(bytes.NewReader(body), r.Body), MaxLength)).Decode(&content)
+	// Read the body into a string for json decoding
+	var content PayloadCollection
+	err := json.NewDecoder(r.Body).Decode(&content)
+	fmt.Println(err)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	fmt.Println("Payloads:", content.Payloads) // Added
+	fmt.Println("content", content)
 
 	// Go through each payload and queue items individually to be posted to S3
 	for _, payload := range content.Payloads {
@@ -141,16 +131,17 @@ type Dispatcher struct {
 
 func NewDispatcher(maxWorkers int) *Dispatcher {
 	pool := make(chan chan Job, maxWorkers)
-	// Initialize and start workers
-	for i := 0; i < maxWorkers; i++ {
-		worker := NewWorker(pool)
-		go worker.Start()
-	}
-
 	return &Dispatcher{WorkerPool: pool}
 }
 
 func (d *Dispatcher) Run() {
+	// starting n number of workers
+	fmt.Println("workerpool length", len(d.WorkerPool))
+	for i := 0; i < cap(d.WorkerPool); i++ {
+		worker := NewWorker(d.WorkerPool)
+		worker.Start()
+	}
+
 	go d.dispatch()
 }
 
@@ -159,10 +150,12 @@ func (d *Dispatcher) dispatch() {
 		select {
 		case job := <-JobQueue:
 			// a job request has been received
-			fmt.Println("Dispatcher received job")
+			fmt.Println("Dispatcher received job", job)
 			go func(job Job) {
 				// try to obtain a worker job channel that is available.
 				// this will block until a worker is idle
+				fmt.Println("workerpool", d.WorkerPool)
+				fmt.Println("job", job)
 				jobChannel := <-d.WorkerPool
 
 				// dispatch the job to the worker job channel
