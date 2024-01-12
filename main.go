@@ -57,8 +57,8 @@ func NewWorker(workerPool chan chan Job) Worker {
 	}
 }
 
-// Start method starts the run loop for the worker, listening for a quit channel in
-// case we need to stop it
+// Start method starts the run loop for the worker, listening for a quit channel
+// in case we need to stop it
 func (w Worker) Start() {
 	go func() {
 		fmt.Println("Worker started")
@@ -136,15 +136,20 @@ func NewDispatcher(maxWorkers int) *Dispatcher {
 
 func (d *Dispatcher) Run() {
 	// starting n number of workers
-	fmt.Println("workerpool length", len(d.WorkerPool))
+	fmt.Println("workerpool capacity", cap(d.WorkerPool))
 	for i := 0; i < cap(d.WorkerPool); i++ {
 		worker := NewWorker(d.WorkerPool)
 		worker.Start()
 	}
 
+	// Initiates the dispatch method in a new goroutine.
+	// This allows the dispatcher to continuously listen for incoming jobs and
+	// dispatch them to available workers concurrently.
 	go d.dispatch()
 }
 
+// Listens for incoming jobs from the JobQueue.
+// Dispatches each job to an available worker.
 func (d *Dispatcher) dispatch() {
 	for {
 		select {
@@ -152,13 +157,14 @@ func (d *Dispatcher) dispatch() {
 			// a job request has been received
 			fmt.Println("Dispatcher received job", job)
 			go func(job Job) {
-				// try to obtain a worker job channel that is available.
-				// this will block until a worker is idle
 				fmt.Println("workerpool", d.WorkerPool)
 				fmt.Println("job", job)
+				// try to obtain a worker job channel that is available.
+				// this will block until a worker is idle
 				jobChannel := <-d.WorkerPool
 
 				// dispatch the job to the worker job channel
+				// effectively dispatches the job to an available worker.
 				jobChannel <- job
 				fmt.Println("Job dispatched to worker")
 			}(job)
